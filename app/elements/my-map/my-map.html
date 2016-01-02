@@ -66,28 +66,10 @@
           console.log('number of tiles to download: ' + numberOfTiles);
           this.prefetchTiles(14);
         },
+
         /**
-         * given a latitude and longitude, and a range of zoom levels, return the list of XYZ trios comprising that view
-         * the caller may then call downloadXYZList() with progress and error callbacks to do that fetching
-         */
-        calculateXYZListFromPyramid: function(lat, lon, zmin, zmax) {
-          var xyzlist = [];
-          for (var z = zmin; z <= zmax; z++) {
-            var t_x = Math.floor((lon + 180) / 360 * Math.pow(2, z));
-            var t_y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
-            var radius = z == zmin ? 0 : Math.pow(2, z - zmin - 1);
-            for (var x = t_x - radius; x <= t_x + radius; x++) {
-              for (var y = t_y - radius; y <= t_y + radius; y++) {
-                xyzlist.push({
-                  x: x,
-                  y: y,
-                  z: z
-                });
-              }
-            }
-          }
-          return xyzlist;
-        },
+        * Functions below from https://github.com/mWater/offline-leaflet-map
+        */
         calculateNbTiles: function(zoomLevelLimit) {
           var count, key, tileImagesToQuery;
           count = 0;
