@@ -1,0 +1,221 @@
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+<link rel="import" href="../leaflet-import/leaflet-import.html">
+<link rel="import" href="../../bower_components/paper-button/paper-button.html">
+
+<dom-module id="my-map">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+      :host #map {
+        height: 80%;
+        width: 100%
+      }
+    </style>
+    <div id="map"></div>
+    <paper-button raised on-click="downloadTiles">Download Tiles</paper-button>
+  </template>
+
+  <script>
+    (function() {
+      'use strict';
+
+      Polymer({
+        is: 'my-map',
+        properties: {
+
+        },
+
+        /**
+         * reference to the leaflet map
+         *
+         * @property map
+         * @type L.map
+         */
+        _map: undefined,
+
+        _baseLayer: undefined,
+
+        ready: function() {
+          // TODO09: Workaround for removed domReady event
+          var me = this;
+          setTimeout(function() {
+            me.domReady();
+          }, 1);
+        },
+        domReady: function() {
+          var map = L.map(this.$.map);
+          this._map = map;
+          map.setView([38.307327, -79.5884124], 11);
+
+          var baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a>' +
+              ' contributors, <a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, ' +
+              'Imagery &copy; <a href="http://mapbox.com">Mapbox</a>',
+            maxZoom: 18
+          });
+          this._baseLayer = baseLayer;
+          this._baseLayer.addTo(this._map);
+
+        },
+        downloadTiles: function() {
+          console.log('downloadTiles called');
+          var numberOfTiles = this.calculateNbTiles(14);
+          console.log('number of tiles to download: ' + numberOfTiles);
+          this.prefetchTiles(14);
+        },
+        /**
+         * given a latitude and longitude, and a range of zoom levels, return the list of XYZ trios comprising that view
+         * the caller may then call downloadXYZList() with progress and error callbacks to do that fetching
+         */
+        calculateXYZListFromPyramid: function(lat, lon, zmin, zmax) {
+          var xyzlist = [];
+          for (var z = zmin; z <= zmax; z++) {
+            var t_x = Math.floor((lon + 180) / 360 * Math.pow(2, z));
+            var t_y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
+            var radius = z == zmin ? 0 : Math.pow(2, z - zmin - 1);
+            for (var x = t_x - radius; x <= t_x + radius; x++) {
+              for (var y = t_y - radius; y <= t_y + radius; y++) {
+                xyzlist.push({
+                  x: x,
+                  y: y,
+                  z: z
+                });
+              }
+            }
+          }
+          return xyzlist;
+        },
+        calculateNbTiles: function(zoomLevelLimit) {
+          var count, key, tileImagesToQuery;
+          count = 0;
+          tileImagesToQuery = this._getTileImages(zoomLevelLimit);
+          for (key in tileImagesToQuery) {
+            count++;
+          }
+          return count;
+        },
+        prefetchTiles: function(zoomLevelLimit) {
+          var key, tileImagesToQuery;
+          tileImagesToQuery = this._getTileImages(zoomLevelLimit);
+          for (key in tileImagesToQuery) {
+            var t = tileImagesToQuery[key];
+            var url = this._createURL(t.x, t.y, t.z);
+            /* @TODO: this needs to be done one at a time with progress indicator
+             * otherwise there will be memory troubles
+             * check if: https://github.com/mWater/offline-leaflet-map/blob/master/dist/offlinemap.js
+             * has a good solution
+             */
+            fetch(url).then(function(response) {
+              console.log('fetched ', response.url);
+            });
+          }
+        },
+        _getTileImages: function(zoomLevelLimit) {
+          var arrayLength, bounds, i, j, map, maxX, maxY, minX, minY, point, roundedTileBounds, startingZoom, tileBounds, tileImagesToQuery, tileSize, tilesInScreen, x, y, _i, _j, _k, _ref, _ref1, _ref2, _ref3;
+          zoomLevelLimit = zoomLevelLimit || this._map.getMaxZoom();
+          tileImagesToQuery = {};
+          map = this._map;
+          startingZoom = map.getZoom();
+          bounds = map.getPixelBounds();
+          tileSize = this._baseLayer._getTileSize();
+          roundedTileBounds = L.bounds(bounds.min.divideBy(tileSize)._floor(), bounds.max.divideBy(tileSize)._floor());
+          tilesInScreen = [];
+          for (j = _i = _ref = roundedTileBounds.min.y, _ref1 = roundedTileBounds.max.y; _ref <= _ref1 ? _i <= _ref1 : _i >= _ref1; j = _ref <= _ref1 ? ++_i : --_i) {
+            for (i = _j = _ref2 = roundedTileBounds.min.x, _ref3 = roundedTileBounds.max.x; _ref2 <= _ref3 ? _j <= _ref3 : _j >= _ref3; i = _ref2 <= _ref3 ? ++_j : --_j) {
+              tilesInScreen.push(new L.Point(i, j));
+            }
+          }
+          tileBounds = L.bounds(bounds.min.divideBy(tileSize), bounds.max.divideBy(tileSize));
+          minY = tileBounds.min.y;
+          maxY = tileBounds.max.y;
+          minX = tileBounds.min.x;
+          maxX = tileBounds.max.x;
+          arrayLength = tilesInScreen.length;
+          for (i = _k = 0; 0 <= arrayLength ? _k < arrayLength : _k > arrayLength; i = 0 <= arrayLength ? ++_k : --_k) {
+            point = tilesInScreen[i];
+            x = point.x;
+            y = point.y;
+            this._getZoomedInTiles(x, y, startingZoom, zoomLevelLimit, tileImagesToQuery, minY, maxY, minX, maxX);
+            this._getZoomedOutTiles(x, y, startingZoom, 0, tileImagesToQuery, minY, maxY, minX, maxX);
+          }
+          return tileImagesToQuery;
+        },
+        _getZoomedInTiles: function(x, y, currentZ, maxZ, tileImagesToQuery, minY, maxY, minX, maxX) {
+          this._getTileImage(x, y, currentZ, tileImagesToQuery, minY, maxY, minX, maxX, true);
+          if (currentZ < maxZ) {
+            minY *= 2;
+            maxY *= 2;
+            minX *= 2;
+            maxX *= 2;
+            this._getZoomedInTiles(x * 2, y * 2, currentZ + 1, maxZ, tileImagesToQuery, minY, maxY, minX, maxX);
+            this._getZoomedInTiles(x * 2 + 1, y * 2, currentZ + 1, maxZ, tileImagesToQuery, minY, maxY, minX, maxX);
+            this._getZoomedInTiles(x * 2, y * 2 + 1, currentZ + 1, maxZ, tileImagesToQuery, minY, maxY, minX, maxX);
+            return this._getZoomedInTiles(x * 2 + 1, y * 2 + 1, currentZ + 1, maxZ, tileImagesToQuery, minY, maxY, minX, maxX);
+          }
+        },
+        _getZoomedOutTiles: function(x, y, currentZ, finalZ, tileImagesToQuery, minY, maxY, minX, maxX) {
+          this._getTileImage(x, y, currentZ, tileImagesToQuery, minY, maxY, minX, maxX, false);
+          if (currentZ > finalZ) {
+            minY /= 2;
+            maxY /= 2;
+            minX /= 2;
+            maxX /= 2;
+            return this._getZoomedOutTiles(Math.floor(x / 2), Math.floor(y / 2), currentZ - 1, finalZ, tileImagesToQuery, minY, maxY, minX, maxX);
+          }
+        },
+        _getTileImage: function(x, y, z, tileImagesToQuery, minY, maxY, minX, maxX) {
+          var key;
+          if (x < Math.floor(minX) || x > Math.floor(maxX) || y < Math.floor(minY) || y > Math.floor(maxY)) {
+            return;
+          }
+          key = this._createTileKey(x, y, z);
+          if (!tileImagesToQuery[key]) {
+            return tileImagesToQuery[key] = {
+              key: key,
+              x: x,
+              y: y,
+              z: z
+            };
+          }
+        },
+        _createNormalizedTilePoint: function(x, y, z) {
+          var nbTilesAtZoomLevel;
+          nbTilesAtZoomLevel = Math.pow(2, z);
+          while (x > nbTilesAtZoomLevel) {
+            x -= nbTilesAtZoomLevel;
+          }
+          while (x < 0) {
+            x += nbTilesAtZoomLevel;
+          }
+          while (y > nbTilesAtZoomLevel) {
+            y -= nbTilesAtZoomLevel;
+          }
+          while (y < 0) {
+            y += nbTilesAtZoomLevel;
+          }
+          return {
+            x: x,
+            y: y,
+            z: z
+          };
+        },
+        _createURL: function(x, y, z) {
+          var tilePoint;
+          tilePoint = this._createNormalizedTilePoint(x, y, z);
+          return this._baseLayer.getTileUrl(tilePoint);
+        },
+        _createTileKey: function(x, y, z) {
+          var tilePoint;
+          tilePoint = this._createNormalizedTilePoint(x, y, z);
+          return tilePoint.x + ", " + tilePoint.y + ", " + tilePoint.z;
+        }
+
+
+
+      });
+    })();
+  </script>
+</dom-module>
